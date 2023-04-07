@@ -5,6 +5,37 @@ RSpec.describe Account, type: :model do
     let(:bob) { Fabricate(:account, username: 'bob') }
     subject { Fabricate(:account) }
 
+    describe '#suspend!' do
+      it 'marks the account as suspended' do
+        subject.suspend!
+        expect(subject.suspended?).to be true
+      end
+
+      it 'creates a deletion request' do
+        subject.suspend!
+        expect(AccountDeletionRequest.where(account: subject).exists?).to be true
+      end
+
+      context 'when the account is of a local user' do
+        let!(:subject) { Fabricate(:user, email: 'foo+bar@domain.org').account }
+
+        it 'creates a canonical domain block' do
+          subject.suspend!
+          expect(CanonicalEmailBlock.block?(subject.user_email)).to be true
+        end
+
+        context 'when a canonical domain block already exists for that email' do
+          before do
+            Fabricate(:canonical_email_block, email: subject.user_email)
+          end
+
+          it 'does not raise an error' do
+            expect { subject.suspend! }.not_to raise_error
+          end
+        end
+      end
+    end
+
     describe '#follow!' do
       it 'creates a follow' do
         follow = subject.follow!(bob)
@@ -131,18 +162,6 @@ RSpec.describe Account, type: :model do
         expect(account.avatar_file_name).to  eq nil
         expect(account.header_file_name).to  eq nil
       end
-    end
-  end
-
-  describe '#subscribed?' do
-    it 'returns false when no subscription expiration information is present' do
-      account = Fabricate(:account, subscription_expires_at: nil)
-      expect(account.subscribed?).to be false
-    end
-
-    it 'returns true when subscription expiration has been set' do
-      account = Fabricate(:account, subscription_expires_at: 30.days.from_now)
-      expect(account.subscribed?).to be true
     end
   end
 
@@ -331,6 +350,45 @@ RSpec.describe Account, type: :model do
       )
     end
 
+    it 'does not return suspended users' do
+      match = Fabricate(
+        :account,
+        display_name: 'Display Name',
+        username: 'username',
+        domain: 'example.com',
+        suspended: true
+      )
+
+      results = Account.search_for('username')
+      expect(results).to eq []
+    end
+
+    it 'does not return unapproved users' do
+      match = Fabricate(
+        :account,
+        display_name: 'Display Name',
+        username: 'username'
+      )
+
+      match.user.update(approved: false)
+
+      results = Account.search_for('username')
+      expect(results).to eq []
+    end
+
+    it 'does not return unconfirmed users' do
+      match = Fabricate(
+        :account,
+        display_name: 'Display Name',
+        username: 'username'
+      )
+
+      match.user.update(confirmed_at: nil)
+
+      results = Account.search_for('username')
+      expect(results).to eq []
+    end
+
     it 'accepts ?, \, : and space as delimiter' do
       match = Fabricate(
         :account,
@@ -403,8 +461,114 @@ RSpec.describe Account, type: :model do
   end
 
   describe '.advanced_search_for' do
+    let(:account) { Fabricate(:account) }
+
+    context 'when limiting search to followed accounts' do
+      it 'accepts ?, \, : and space as delimiter' do
+        match = Fabricate(
+          :account,
+          display_name: 'A & l & i & c & e',
+          username: 'username',
+          domain: 'example.com'
+        )
+        account.follow!(match)
+
+        results = Account.advanced_search_for('A?l\i:c e', account, 10, true)
+        expect(results).to eq [match]
+      end
+
+      it 'does not return non-followed accounts' do
+        match = Fabricate(
+          :account,
+          display_name: 'A & l & i & c & e',
+          username: 'username',
+          domain: 'example.com'
+        )
+
+        results = Account.advanced_search_for('A?l\i:c e', account, 10, true)
+        expect(results).to eq []
+      end
+
+      it 'does not return suspended users' do
+        match = Fabricate(
+          :account,
+          display_name: 'Display Name',
+          username: 'username',
+          domain: 'example.com',
+          suspended: true
+        )
+
+        results = Account.advanced_search_for('username', account, 10, true)
+        expect(results).to eq []
+      end
+
+      it 'does not return unapproved users' do
+        match = Fabricate(
+          :account,
+          display_name: 'Display Name',
+          username: 'username'
+        )
+
+        match.user.update(approved: false)
+
+        results = Account.advanced_search_for('username', account, 10, true)
+        expect(results).to eq []
+      end
+
+      it 'does not return unconfirmed users' do
+        match = Fabricate(
+          :account,
+          display_name: 'Display Name',
+          username: 'username'
+        )
+
+        match.user.update(confirmed_at: nil)
+
+        results = Account.advanced_search_for('username', account, 10, true)
+        expect(results).to eq []
+      end
+    end
+
+    it 'does not return suspended users' do
+      match = Fabricate(
+        :account,
+        display_name: 'Display Name',
+        username: 'username',
+        domain: 'example.com',
+        suspended: true
+      )
+
+      results = Account.advanced_search_for('username', account)
+      expect(results).to eq []
+    end
+
+    it 'does not return unapproved users' do
+      match = Fabricate(
+        :account,
+        display_name: 'Display Name',
+        username: 'username'
+      )
+
+      match.user.update(approved: false)
+
+      results = Account.advanced_search_for('username', account)
+      expect(results).to eq []
+    end
+
+    it 'does not return unconfirmed users' do
+      match = Fabricate(
+        :account,
+        display_name: 'Display Name',
+        username: 'username'
+      )
+
+      match.user.update(confirmed_at: nil)
+
+      results = Account.advanced_search_for('username', account)
+      expect(results).to eq []
+    end
+
     it 'accepts ?, \, : and space as delimiter' do
-      account = Fabricate(:account)
       match = Fabricate(
         :account,
         display_name: 'A & l & i & c & e',
@@ -418,18 +582,17 @@ RSpec.describe Account, type: :model do
 
     it 'limits by 10 by default' do
       11.times { Fabricate(:account, display_name: "Display Name") }
-      results = Account.search_for("display")
+      results = Account.advanced_search_for("display", account)
       expect(results.size).to eq 10
     end
 
     it 'accepts arbitrary limits' do
       2.times { Fabricate(:account, display_name: "Display Name") }
-      results = Account.search_for("display", 1)
+      results = Account.advanced_search_for("display", account, 1)
       expect(results.size).to eq 1
     end
 
     it 'ranks followed accounts higher' do
-      account = Fabricate(:account)
       match = Fabricate(:account, username: "Matching")
       followed_match = Fabricate(:account, username: "Matcher")
       Fabricate(:follow, account: account, target_account: followed_match)
@@ -437,13 +600,6 @@ RSpec.describe Account, type: :model do
       results = Account.advanced_search_for("match", account)
       expect(results).to eq [followed_match, match]
       expect(results.first.rank).to be > results.last.rank
-    end
-  end
-
-  describe '.domains' do
-    it 'returns domains' do
-      Fabricate(:account, domain: 'domain')
-      expect(Account.remote.domains).to match_array(['domain'])
     end
   end
 
@@ -714,40 +870,11 @@ RSpec.describe Account, type: :model do
       end
     end
 
-    describe 'expiring' do
-      it 'returns remote accounts with followers whose subscription expiration date is past or not given' do
-        local = Fabricate(:account, domain: nil)
-        matches = [
-          { domain: 'remote', subscription_expires_at: '2000-01-01T00:00:00Z' },
-        ].map(&method(:Fabricate).curry(2).call(:account))
-        matches.each(&local.method(:follow!))
-        Fabricate(:account, domain: 'remote', subscription_expires_at: nil)
-        local.follow!(Fabricate(:account, domain: 'remote', subscription_expires_at: '2000-01-03T00:00:00Z'))
-        local.follow!(Fabricate(:account, domain: nil, subscription_expires_at: nil))
-
-        expect(Account.expiring('2000-01-02T00:00:00Z').recent).to eq matches.reverse
-      end
-    end
-
     describe 'remote' do
       it 'returns an array of accounts who have a domain' do
         account_1 = Fabricate(:account, domain: nil)
         account_2 = Fabricate(:account, domain: 'example.com')
         expect(Account.remote).to match_array([account_2])
-      end
-    end
-
-    describe 'by_domain_accounts' do
-      it 'returns accounts grouped by domain sorted by accounts' do
-        2.times { Fabricate(:account, domain: 'example.com') }
-        Fabricate(:account, domain: 'example2.com')
-
-        results = Account.where('id > 0').by_domain_accounts
-        expect(results.length).to eq 2
-        expect(results.first.domain).to eq 'example.com'
-        expect(results.first.accounts_count).to eq 2
-        expect(results.last.domain).to eq 'example2.com'
-        expect(results.last.accounts_count).to eq 1
       end
     end
 
@@ -792,6 +919,32 @@ RSpec.describe Account, type: :model do
         expect(Account.suspended).to match_array([account_1])
       end
     end
+
+    describe 'searchable' do
+      let!(:suspended_local)        { Fabricate(:account, suspended: true, username: 'suspended_local') }
+      let!(:suspended_remote)       { Fabricate(:account, suspended: true, domain: 'example.org', username: 'suspended_remote') }
+      let!(:silenced_local)         { Fabricate(:account, silenced: true, username: 'silenced_local') }
+      let!(:silenced_remote)        { Fabricate(:account, silenced: true, domain: 'example.org', username: 'silenced_remote') }
+      let!(:unconfirmed)            { Fabricate(:user, confirmed_at: nil).account }
+      let!(:unapproved)             { Fabricate(:user, approved: false).account }
+      let!(:unconfirmed_unapproved) { Fabricate(:user, confirmed_at: nil, approved: false).account }
+      let!(:local_account)          { Fabricate(:account, username: 'local_account') }
+      let!(:remote_account)         { Fabricate(:account, domain: 'example.org', username: 'remote_account') }
+
+      before do
+        # Accounts get automatically-approved depending on settings, so ensure they aren't approved
+        unapproved.user.update(approved: false)
+        unconfirmed_unapproved.user.update(approved: false)
+      end
+
+      it 'returns every usable non-suspended account' do
+        expect(Account.searchable).to match_array([silenced_local, silenced_remote, local_account, remote_account])
+      end
+
+      it 'does not mess with previously-applied scopes' do
+        expect(Account.where.not(id: remote_account.id).searchable).to match_array([silenced_local, silenced_remote, local_account])
+      end
+    end
   end
 
   context 'when is local' do
@@ -817,4 +970,27 @@ RSpec.describe Account, type: :model do
 
   include_examples 'AccountAvatar', :account
   include_examples 'AccountHeader', :account
+
+  describe '#increment_count!' do
+    subject { Fabricate(:account) }
+
+    it 'increments the count in multi-threaded an environment when account_stat is not yet initialized' do
+      subject
+
+      increment_by   = 15
+      wait_for_start = true
+
+      threads = Array.new(increment_by) do
+        Thread.new do
+          true while wait_for_start
+          Account.find(subject.id).increment_count!(:followers_count)
+        end
+      end
+
+      wait_for_start = false
+      threads.each(&:join)
+
+      expect(subject.reload.followers_count).to eq 15
+    end
+  end
 end

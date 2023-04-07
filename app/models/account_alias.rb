@@ -28,12 +28,17 @@ class AccountAlias < ApplicationRecord
     super(val.start_with?('@') ? val[1..-1] : val)
   end
 
+  def pretty_acct
+    username, domain = acct.split('@')
+    domain.nil? ? username : "#{username}@#{Addressable::IDNA.to_unicode(domain)}"
+  end
+
   private
 
   def set_uri
     target_account = ResolveAccountService.new.call(acct)
     self.uri       = ActivityPub::TagManager.instance.uri_for(target_account) unless target_account.nil?
-  rescue Goldfinger::Error, HTTP::Error, OpenSSL::SSL::SSLError, Mastodon::Error
+  rescue Webfinger::Error, HTTP::Error, OpenSSL::SSL::SSLError, Mastodon::Error
     # Validation will take care of it
   end
 

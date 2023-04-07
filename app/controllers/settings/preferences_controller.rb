@@ -1,10 +1,6 @@
 # frozen_string_literal: true
 
 class Settings::PreferencesController < Settings::BaseController
-  layout 'admin'
-
-  before_action :authenticate_user!
-
   def show; end
 
   def update
@@ -47,10 +43,10 @@ class Settings::PreferencesController < Settings::BaseController
       :setting_display_media,
       :setting_expand_spoilers,
       :setting_reduce_motion,
+      :setting_disable_swiping,
       :setting_system_font_ui,
       :setting_noindex,
       :setting_theme,
-      :setting_hide_network,
       :setting_aggregate_reblogs,
       :setting_show_application,
       :setting_advanced_layout,
@@ -58,7 +54,8 @@ class Settings::PreferencesController < Settings::BaseController
       :setting_use_pending_items,
       :setting_trends,
       :setting_crop_images,
-      notification_emails: %i(follow follow_request reblog favourite mention digest report pending_account trending_tag),
+      :setting_always_send_emails,
+      notification_emails: %i(follow follow_request reblog favourite mention digest report pending_account trending_tag appeal),
       interactions: %i(must_be_follower must_be_following must_be_following_dm)
     )
   end

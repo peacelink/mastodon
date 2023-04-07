@@ -5,16 +5,16 @@ class Api::BaseController < ApplicationController
   DEFAULT_ACCOUNTS_LIMIT = 40
 
   include RateLimitHeaders
+  include AccessTokenTrackingConcern
 
   skip_before_action :store_current_location
-  skip_before_action :require_functional!
+  skip_before_action :require_functional!, unless: :whitelist_mode?
 
   before_action :require_authenticated_user!, if: :disallow_unauthenticated_api_access?
+  before_action :require_not_suspended!
   before_action :set_cache_headers
 
   protect_from_forgery with: :null_session
-
-  skip_around_action :set_locale
 
   rescue_from ActiveRecord::RecordInvalid, Mastodon::ValidationError do |e|
     render json: { error: e.to_s }, status: 422
@@ -40,7 +40,12 @@ class Api::BaseController < ApplicationController
     render json: { error: 'This action is not allowed' }, status: 403
   end
 
-  rescue_from Mastodon::RaceConditionError do
+  rescue_from Seahorse::Client::NetworkingError do |e|
+    Rails.logger.warn "Storage server error: #{e}"
+    render json: { error: 'There was a temporary problem serving your request, please try again' }, status: 503
+  end
+
+  rescue_from Mastodon::RaceConditionError, Stoplight::Error::RedLight do
     render json: { error: 'There was a temporary problem serving your request, please try again' }, status: 503
   end
 
@@ -71,6 +76,7 @@ class Api::BaseController < ApplicationController
 
   def limit_param(default_limit)
     return default_limit unless params[:limit]
+
     [params[:limit].to_i.abs, default_limit * 2].min
   end
 
@@ -92,17 +98,21 @@ class Api::BaseController < ApplicationController
     render json: { error: 'This method requires an authenticated user' }, status: 401 unless current_user
   end
 
+  def require_not_suspended!
+    render json: { error: 'Your login is currently disabled' }, status: 403 if current_user&.account&.suspended?
+  end
+
   def require_user!
     if !current_user
       render json: { error: 'This method requires an authenticated user' }, status: 422
-    elsif current_user.disabled?
-      render json: { error: 'Your login is currently disabled' }, status: 403
     elsif !current_user.confirmed?
       render json: { error: 'Your login is missing a confirmed e-mail address' }, status: 403
     elsif !current_user.approved?
       render json: { error: 'Your login is currently pending approval' }, status: 403
+    elsif !current_user.functional?
+      render json: { error: 'Your login is currently disabled' }, status: 403
     else
-      set_user_activity
+      update_user_sign_in
     end
   end
 

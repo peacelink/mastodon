@@ -1,3 +1,4 @@
+import './public-path';
 import escapeTextContentForBrowser from 'escape-html';
 import loadPolyfills from '../mastodon/load_polyfills';
 import ready from '../mastodon/ready';
@@ -116,6 +117,32 @@ function main() {
       new Rellax('.parallax', { speed: -1 });
     }
 
+    delegate(document, '#registration_user_password_confirmation,#registration_user_password', 'input', () => {
+      const password = document.getElementById('registration_user_password');
+      const confirmation = document.getElementById('registration_user_password_confirmation');
+      if (confirmation.value && confirmation.value.length > password.maxLength) {
+        confirmation.setCustomValidity((new IntlMessageFormat(messages['password_confirmation.exceeds_maxlength'] || 'Password confirmation exceeds the maximum password length', locale)).format());
+      } else if (password.value && password.value !== confirmation.value) {
+        confirmation.setCustomValidity((new IntlMessageFormat(messages['password_confirmation.mismatching'] || 'Password confirmation does not match', locale)).format());
+      } else {
+        confirmation.setCustomValidity('');
+      }
+    });
+
+    delegate(document, '#user_password,#user_password_confirmation', 'input', () => {
+      const password = document.getElementById('user_password');
+      const confirmation = document.getElementById('user_password_confirmation');
+      if (!confirmation) return;
+
+      if (confirmation.value && confirmation.value.length > password.maxLength) {
+        confirmation.setCustomValidity((new IntlMessageFormat(messages['password_confirmation.exceeds_maxlength'] || 'Password confirmation exceeds the maximum password length', locale)).format());
+      } else if (password.value && password.value !== confirmation.value) {
+        confirmation.setCustomValidity((new IntlMessageFormat(messages['password_confirmation.mismatching'] || 'Password confirmation does not match', locale)).format());
+      } else {
+        confirmation.setCustomValidity('');
+      }
+    });
+
     delegate(document, '.custom-emoji', 'mouseover', getEmojiAnimationHandler('data-original'));
     delegate(document, '.custom-emoji', 'mouseout', getEmojiAnimationHandler('data-static'));
 
@@ -207,10 +234,12 @@ function main() {
   delegate(document, '#account_locked', 'change', ({ target }) => {
     const lock = document.querySelector('.card .display-name i');
 
-    if (target.checked) {
-      lock.style.display = 'inline';
-    } else {
-      lock.style.display = 'none';
+    if (lock) {
+      if (target.checked) {
+        delete lock.dataset.hidden;
+      } else {
+        lock.dataset.hidden = 'true';
+      }
     }
   });
 
@@ -247,13 +276,18 @@ function main() {
   });
 
   delegate(document, '.sidebar__toggle__icon', 'click', () => {
-    const target = document.querySelector('.sidebar ul');
+    document.querySelector('.sidebar ul').classList.toggle('visible');
+  });
 
-    if (target.style.display === 'block') {
-      target.style.display = 'none';
-    } else {
-      target.style.display = 'block';
-    }
+  // Empty the honeypot fields in JS in case something like an extension
+  // automatically filled them.
+  delegate(document, '#registration_new_user,#new_user', 'submit', () => {
+    ['user_website', 'user_confirm_password', 'registration_user_website', 'registration_user_confirm_password'].forEach(id => {
+      const field = document.getElementById(id);
+      if (field) {
+        field.value = '';
+      }
+    });
   });
 }
 

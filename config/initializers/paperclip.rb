@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 Paperclip::DataUriAdapter.register
+Paperclip::ResponseWithLimitAdapter.register
 
 Paperclip.interpolates :filename do |attachment, style|
   if style == :original
@@ -61,7 +62,7 @@ if ENV['S3_ENABLED'] == 'true'
     s3_options: {
       signature_version: ENV.fetch('S3_SIGNATURE_VERSION') { 'v4' },
       http_open_timeout: ENV.fetch('S3_OPEN_TIMEOUT'){ '5' }.to_i,
-      http_read_timeout: 5,
+      http_read_timeout: ENV.fetch('S3_READ_TIMEOUT'){ '5' }.to_i,
       http_idle_timeout: 5,
       retry_limit: 0,
     }
@@ -81,6 +82,26 @@ if ENV['S3_ENABLED'] == 'true'
       url: ':s3_alias_url',
       s3_host_alias: ENV['S3_ALIAS_HOST'] || ENV['S3_CLOUDFRONT_HOST']
     )
+  end
+
+  # Some S3-compatible providers might not actually be compatible with some APIs
+  # used by kt-paperclip, see https://github.com/mastodon/mastodon/issues/16822
+  if ENV['S3_FORCE_SINGLE_REQUEST'] == 'true'
+    module Paperclip
+      module Storage
+        module S3Extensions
+          def copy_to_local_file(style, local_dest_path)
+            log("copying #{path(style)} to local file #{local_dest_path}")
+            s3_object(style).download_file(local_dest_path, { mode: 'single_request' })
+          rescue Aws::Errors::ServiceError => e
+            warn("#{e} - cannot copy #{path(style)} to local file #{local_dest_path}")
+            false
+          end
+        end
+      end
+    end
+
+    Paperclip::Storage::S3.prepend(Paperclip::Storage::S3Extensions)
   end
 elsif ENV['SWIFT_ENABLED'] == 'true'
   require 'fog/openstack'
@@ -106,8 +127,22 @@ elsif ENV['SWIFT_ENABLED'] == 'true'
 else
   Paperclip::Attachment.default_options.merge!(
     storage: :filesystem,
-    use_timestamp: true,
     path: File.join(ENV.fetch('PAPERCLIP_ROOT_PATH', File.join(':rails_root', 'public', 'system')), ':prefix_path:class', ':attachment', ':id_partition', ':style', ':filename'),
     url: ENV.fetch('PAPERCLIP_ROOT_URL', '/system') + '/:prefix_url:class/:attachment/:id_partition/:style/:filename',
   )
+end
+
+Rails.application.reloader.to_prepare do
+  Paperclip.options[:content_type_mappings] = { csv: Import::FILE_TYPES }
+end
+
+# In some places in the code, we rescue this exception, but we don't always
+# load the S3 library, so it may be an undefined constant:
+
+unless defined?(Seahorse)
+  module Seahorse
+    module Client
+      class NetworkingError < StandardError; end
+    end
+  end
 end

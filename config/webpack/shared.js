@@ -5,7 +5,6 @@ const { basename, dirname, join, relative, resolve } = require('path');
 const { sync } = require('glob');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const AssetsManifestPlugin = require('webpack-assets-manifest');
-const CopyPlugin = require('copy-webpack-plugin');
 const extname = require('path-complete-extname');
 const { env, settings, themes, output } = require('./configuration');
 const rules = require('./rules');
@@ -38,6 +37,7 @@ module.exports = {
     filename: 'js/[name]-[chunkhash].js',
     chunkFilename: 'js/[name]-[chunkhash].chunk.js',
     hotUpdateChunkFilename: 'js/[id]-[hash].hot-update.js',
+    hashFunction: 'sha256',
     path: output.path,
     publicPath: output.publicPath,
   },
@@ -80,15 +80,12 @@ module.exports = {
       chunkFilename: 'css/[name]-[contenthash:8].chunk.css',
     }),
     new AssetsManifestPlugin({
-      integrity: false,
+      integrity: true,
+      integrityHashes: ['sha256'],
       entrypoints: true,
       writeToDisk: true,
       publicPath: true,
     }),
-    new CopyPlugin([
-      { from: 'node_modules/tesseract.js/dist/worker.min.js', to: 'ocr' },
-      { from: 'node_modules/tesseract.js-core/tesseract-core.wasm.js', to: 'ocr' },
-    ]),
   ],
 
   resolve: {
