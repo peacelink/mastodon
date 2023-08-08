@@ -90,7 +90,7 @@ services:
     build: .
     restart: always
     env_file: .env.production
-    command: bundle exec sidekiq
+    command: bundle exec sidekiq -q ingress -q scheduler
     depends_on:
       - db
       - redis
