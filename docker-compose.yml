@@ -47,7 +47,7 @@ services:
         hard: -1
 
   web:
-    image: altrinformazione/mastodon:4.1.4
+    image: altrinformazione/mastodon:4.1.13
     build: .
     restart: always
     env_file: .env.production
@@ -68,7 +68,7 @@ services:
       - ./public/system:/mastodon/public/system
 
   streaming:
-    image: altrinformazione/mastodon:4.1.4
+    image: altrinformazione/mastodon:4.1.13
     build: .
     restart: always
     env_file: .env.production
@@ -86,7 +86,7 @@ services:
       - redis
 
   sidekiq:
-    image: altrinformazione/mastodon:4.1.4
+    image: altrinformazione/mastodon:4.1.13
     build: .
     restart: always
     env_file: .env.production
